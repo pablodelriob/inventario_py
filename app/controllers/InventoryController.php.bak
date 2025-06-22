@@ -1,0 +1,323 @@
+<?php
+// app/controllers/InventoryController.php
+
+class InventoryController {
+    private $db;
+    private $depositoModel;
+    private $inventoryModel;
+    private $productModel;
+    private $userModel;
+
+    public function __construct() {
+        $this->db = new Database();
+        $this->depositoModel = new DepositoModel($this->db);
+        $this->inventoryModel = new InventoryModel($this->db);
+        $this->productModel = new ProductModel($this->db);
+        $this->userModel = new UserModel($this->db);
+
+        if (!isset($_SESSION['user_id'])) {
+            header('Location: ' . URLROOT . '/auth/login');
+            exit();
+        }
+    }
+// NUEVO MÉTODO: reports
+    public function reports() {
+        // Permisos para ver reportes: Administrador, Gerente de Almacén
+        if ($_SESSION['role_name'] !== 'Administrador' && $_SESSION['role_name'] !== 'Gerente_Almacen') {
+            $_SESSION['error'] = "Acceso denegado. No tienes permisos para ver los reportes.";
+            header('Location: ' . URLROOT . '/home');
+            exit();
+        }
+
+        // Obtener datos para el reporte de stock actual
+        // Reutilizamos getDetailedInventory que ya lista el stock por producto en cada depósito
+        $inventario_detallado = $this->inventoryModel->getDetailedInventory();
+        $depositos = $this->depositoModel->getAllDepositos(); // Necesario para los encabezados de la tabla
+
+        // Obtener todos los movimientos de inventario
+        $movimientos = $this->inventoryModel->getAllInventoryMovements();
+
+        // Cargar la vista de reportes
+        require_once '../app/views/inventory/reports.php';
+    }
+
+    // --- Métodos para Gestión de Depósitos (Redirecciones Corregidas) ---
+
+    // No hay método 'depositos()' separado, todo se gestiona desde 'index()'
+
+    // Muestra el formulario para crear un nuevo depósito
+    public function createDeposito() {
+        if ($_SESSION['role_name'] !== 'Administrador') {
+            $_SESSION['error'] = "Acceso denegado. Solo los administradores pueden crear depósitos.";
+            header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+            exit();
+        }
+        require_once '../app/views/inventory/depositos/create_edit.php';
+    }
+
+    // Procesa el formulario de creación de un depósito
+    public function storeDeposito() {
+        if ($_SESSION['role_name'] !== 'Administrador') {
+            $_SESSION['error'] = "Acceso denegado.";
+            header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+            exit();
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            $nombre = trim($_POST['nombre_deposito']);
+            $ubicacion = trim($_POST['ubicacion']);
+            $capacidad_maxima = !empty($_POST['capacidad_maxima']) ? (int)$_POST['capacidad_maxima'] : null;
+
+            if (empty($nombre)) {
+                $_SESSION['error'] = "El nombre del depósito es obligatorio.";
+                header('Location: ' . URLROOT . '/inventory/createDeposito');
+                exit();
+            }
+            if ($this->depositoModel->findDepositoByName($nombre)) {
+                $_SESSION['error'] = "Ya existe un depósito con este nombre.";
+                header('Location: ' . URLROOT . '/inventory/createDeposito');
+                exit();
+            }
+
+            if ($this->depositoModel->addDeposito($nombre, $ubicacion, $capacidad_maxima)) {
+                $_SESSION['message'] = "Depósito creado exitosamente.";
+                header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+                exit();
+            } else {
+                $_SESSION['error'] = "Error al crear el depósito. Intenta de nuevo.";
+                header('Location: ' . URLROOT . '/inventory/createDeposito');
+                exit();
+            }
+        } else {
+            header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+            exit();
+        }
+    }
+
+    // Muestra el formulario para editar un depósito
+    public function editDeposito($id) {
+        if ($_SESSION['role_name'] !== 'Administrador') {
+            $_SESSION['error'] = "Acceso denegado. Solo los administradores pueden editar depósitos.";
+            header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+            exit();
+        }
+
+        $deposito = $this->depositoModel->getDepositoById($id);
+        if (!$deposito) {
+            $_SESSION['error'] = "Depósito no encontrado.";
+            header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+            exit();
+        }
+        require_once '../app/views/inventory/depositos/create_edit.php';
+    }
+
+    // Procesa el formulario de edición de un depósito
+    public function updateDeposito($id) {
+        if ($_SESSION['role_name'] !== 'Administrador') {
+            $_SESSION['error'] = "Acceso denegado.";
+            header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+            exit();
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            $nombre = trim($_POST['nombre_deposito']);
+            $ubicacion = trim($_POST['ubicacion']);
+            $capacidad_maxima = !empty($_POST['capacidad_maxima']) ? (int)$_POST['capacidad_maxima'] : null;
+
+            if (empty($nombre)) {
+                $_SESSION['error'] = "El nombre del depósito es obligatorio.";
+                header('Location: ' . URLROOT . '/inventory/editDeposito/' . $id);
+                exit();
+            }
+            $existingDeposito = $this->depositoModel->findDepositoByName($nombre);
+            if ($existingDeposito && $existingDeposito->id_deposito != $id) {
+                $_SESSION['error'] = "Ya existe otro depósito con este nombre.";
+                header('Location: ' . URLROOT . '/inventory/editDeposito/' . $id);
+                exit();
+            }
+
+            if ($this->depositoModel->updateDeposito($id, $nombre, $ubicacion, $capacidad_maxima)) {
+                $_SESSION['message'] = "Depósito actualizado exitosamente.";
+                header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+                exit();
+            } else {
+                $_SESSION['error'] = "Error al actualizar el depósito. Intenta de nuevo.";
+                header('Location: ' . URLROOT . '/inventory/editDeposito/' . $id);
+                exit();
+            }
+        } else {
+            header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+            exit();
+        }
+    }
+
+    // Elimina un depósito
+    public function deleteDeposito($id) {
+        if ($_SESSION['role_name'] !== 'Administrador') {
+            $_SESSION['error'] = "Acceso denegado. Solo los administradores pueden eliminar depósitos.";
+            header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+            exit();
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            if ($this->inventoryModel->countProductsInDeposito($id) > 0) {
+                $_SESSION['error'] = "No se puede eliminar el depósito porque contiene productos. Mueve o vacía el inventario primero.";
+                header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+                exit();
+            }
+
+            if ($this->depositoModel->deleteDeposito($id)) {
+                $_SESSION['message'] = "Depósito eliminado exitosamente.";
+                header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+                exit();
+            } else {
+                $_SESSION['error'] = "Error al eliminar el depósito.";
+                header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+                exit();
+            }
+        } else {
+            $_SESSION['error'] = "Método no permitido para eliminar.";
+            header('Location: ' . URLROOT . '/inventory/index'); // Redirige a la lista general
+            exit();
+        }
+    }
+
+    // --- Métodos para Visualización del Inventario ---
+
+    // Muestra un resumen general del inventario por depósito y por producto
+   public function index() {
+        if ($_SESSION['role_name'] !== 'Administrador' && $_SESSION['role_name'] !== 'Gerente_Almacen' && $_SESSION['role_name'] !== 'Vendedor') {
+            $_SESSION['error'] = "Acceso denegado. No tienes permisos para ver el inventario.";
+            header('Location: ' . URLROOT . '/home');
+            exit();
+        }
+
+        $depositos = $this->depositoModel->getAllDepositos();
+        $inventario_por_deposito = $this->inventoryModel->getTotalProductsPerDeposito();
+        $inventario_detallado = $this->inventoryModel->getDetailedInventory();
+        $products_without_stock_info = $this->productModel->getAllProducts();
+
+        require_once '../app/views/inventory/index.php';
+    }
+
+    public function addStock($productId, $depositoId) {
+        if ($_SESSION['role_name'] !== 'Administrador' && $_SESSION['role_name'] !== 'Gerente_Almacen') {
+            $_SESSION['error'] = "Acceso denegado. No tienes permisos para añadir stock directamente.";
+            header('Location: ' . URLROOT . '/inventory/index');
+            exit();
+        }
+
+        $product = $this->productModel->getProductById($productId);
+        $deposito = $this->depositoModel->getDepositoById($depositoId);
+
+        if (!$product || !$deposito) {
+            $_SESSION['error'] = "Producto o depósito no encontrado.";
+            header('Location: ' . URLROOT . '/inventory/index');
+            exit();
+        }
+
+        require_once '../app/views/inventory/add_stock.php';
+    }
+
+    public function processAddStock($productId, $depositoId) {
+        if ($_SESSION['role_name'] !== 'Administrador' && $_SESSION['role_name'] !== 'Gerente_Almacen') {
+            $_SESSION['error'] = "Acceso denegado.";
+            header('Location: ' . URLROOT . '/inventory/index');
+            exit();
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            $cantidad = (int)$_POST['cantidad'];
+            $tipo_movimiento = $_POST['tipo_movimiento'];
+            $observaciones = trim($_POST['observaciones']);
+
+            if ($cantidad <= 0 && ($tipo_movimiento === 'Entrada' || $tipo_movimiento === 'Ajuste_Positivo')) {
+                $_SESSION['error'] = "La cantidad debe ser un número positivo para este tipo de entrada.";
+                header('Location: ' . URLROOT . '/inventory/addStock/' . $productId . '/' . $depositoId);
+                exit();
+            }
+            if ($cantidad < 0 && ($tipo_movimiento === 'Salida' || $tipo_movimiento === 'Ajuste_Negativo')) {
+                 $_SESSION['error'] = "Para registrar salidas o ajustes negativos, ingresa una cantidad positiva y selecciona el tipo 'Salida' o 'Ajuste Negativo'.";
+                 header('Location: ' . URLROOT . '/inventory/addStock/' . $productId . '/' . $depositoId);
+                 exit();
+            }
+
+            // Si es un ajuste negativo o salida, la cantidad debe ser negativa para el modelo
+            $cantidad_para_modelo = ($tipo_movimiento === 'Salida' || $tipo_movimiento === 'Ajuste_Negativo') ? -$cantidad : $cantidad;
+
+
+            if ($this->inventoryModel->updateProductStock($productId, $depositoId, $cantidad_para_modelo, $_SESSION['user_id'], $tipo_movimiento, $observaciones,
+                ($tipo_movimiento === 'Salida' || $tipo_movimiento === 'Ajuste_Negativo' ? $depositoId : null),
+                ($tipo_movimiento === 'Entrada' || $tipo_movimiento === 'Ajuste_Positivo' ? $depositoId : null)
+            )) {
+                $_SESSION['message'] = "Stock actualizado exitosamente.";
+                header('Location: ' . URLROOT . '/inventory/index');
+                exit();
+            } else {
+                $_SESSION['error'] = "Error al actualizar el stock o stock insuficiente.";
+                header('Location: ' . URLROOT . '/inventory/addStock/' . $productId . '/' . $depositoId);
+                exit();
+            }
+        } else {
+            header('Location: ' . URLROOT . '/inventory/index');
+            exit();
+        }
+    }
+
+    // NUEVOS MÉTODOS PARA SALIDA / VENTA
+    public function sellProduct() {
+        if ($_SESSION['role_name'] !== 'Administrador' && $_SESSION['role_name'] !== 'Gerente_Almacen' && $_SESSION['role_name'] !== 'Vendedor') {
+            $_SESSION['error'] = "Acceso denegado. No tienes permisos para registrar ventas.";
+            header('Location: ' . URLROOT . '/home');
+            exit();
+        }
+
+        $products = $this->productModel->getAllProducts();
+        $depositos = $this->depositoModel->getAllDepositos();
+
+        require_once '../app/views/inventory/sell.php';
+    }
+
+    public function processSell() {
+        if ($_SESSION['role_name'] !== 'Administrador' && $_SESSION['role_name'] !== 'Gerente_Almacen' && $_SESSION['role_name'] !== 'Vendedor') {
+            $_SESSION['error'] = "Acceso denegado.";
+            header('Location: ' . URLROOT . '/inventory/index');
+            exit();
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            $productId = (int)$_POST['product_id'];
+            $depositoId = (int)$_POST['deposito_id'];
+            $cantidad = (int)$_POST['cantidad'];
+            $observaciones = trim($_POST['observaciones'] ?? ''); // Puede ser vacío
+
+            if ($cantidad <= 0) {
+                $_SESSION['error'] = "La cantidad a vender debe ser un número positivo.";
+                header('Location: ' . URLROOT . '/inventory/sellProduct');
+                exit();
+            }
+
+            // Obtener el stock actual antes de intentar vender
+            $currentStock = $this->inventoryModel->getProductStockInDeposito($productId, $depositoId);
+
+            if ($currentStock < $cantidad) {
+                $_SESSION['error'] = "Stock insuficiente en el depósito seleccionado. Stock actual: {$currentStock}.";
+                header('Location: ' . URLROOT . '/inventory/sellProduct');
+                exit();
+            }
+
+            if ($this->inventoryModel->decrementStock($productId, $depositoId, $cantidad, $_SESSION['user_id'], $observaciones)) {
+                $_SESSION['message'] = "Venta registrada y stock actualizado exitosamente.";
+                header('Location: ' . URLROOT . '/inventory/index'); // Redirige al inventario general
+                exit();
+            } else {
+                $_SESSION['error'] = "Error al registrar la venta. Intenta de nuevo.";
+                header('Location: ' . URLROOT . '/inventory/sellProduct');
+                exit();
+            }
+        } else {
+            header('Location: ' . URLROOT . '/inventory/sellProduct');
+            exit();
+        }
+    }
+}
